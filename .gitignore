@@ -1,14 +1,19 @@
 # untracked files
 *.log
 *.tmp
+
 # build artifacts
-/dist
-/node_modules
-/build
+/backend/dist
+/backend/node_modules
+/frontend/dist
+/frontend/node_modules
+
 # environment files
 .env
+
 # IDE files
 .idea/
 .vscode/
+
 # OS files
 .DS_Store
