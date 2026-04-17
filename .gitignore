@@ -1,0 +1,14 @@
+# untracked files
+*.log
+*.tmp
+# build artifacts
+/dist
+/node_modules
+/build
+# environment files
+.env
+# IDE files
+.idea/
+.vscode/
+# OS files
+.DS_Store
