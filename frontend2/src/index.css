@@ -1,0 +1,18 @@
+@import url('https://fonts.googleapis.com/css2?family=Bitcount+Grid+Double&family=Michroma&display=swap');
+@import "tailwindcss";
+
+/* Import custom fonts */
+/* "Bitcount Grid Double"
+"Rethink Sans"
+"Michroma" */
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Michroma', sans-serif;
+}
+
+/* Ensure Bitcount Grid Double is available for custom use */
+.bitcount-title {
+  font-family: 'Bitcount Grid Double', monospace;
+}
