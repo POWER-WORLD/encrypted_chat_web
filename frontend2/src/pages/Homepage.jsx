@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import SocialButtons from '../ui/SocialButtons';
 import Login from '../components/authentication/login';
@@ -6,6 +7,14 @@ import Signup from '../components/authentication/signup';
 
 const Homepage = () => {
   const [isLogin, setIsLogin] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const userInfo = localStorage.getItem("userInfo");
+    if (userInfo) {
+      navigate('/chats');
+    }
+  }, [navigate]);
 
   return (
     <div
@@ -29,7 +38,7 @@ const Homepage = () => {
           <span className="inline-block">Welcome to</span>
           <br />
           <span className="relative inline-block mt-2 bg-gradient-to-r from-indigo-400 via-cyan-400 to-purple-500 bg-clip-text text-transparent filter drop-shadow-[0_0_15px_rgba(99,102,241,0.4)]">
-            message encryptor
+            Message Encryptor
           </span>
         </h1>
 
@@ -49,7 +58,7 @@ const Homepage = () => {
       {/* Auth Container */}
       <div className="w-full max-w-[420px] bg-transparent relative mx-auto md:mx-10">
         {/* Tab Switcher */}
-        <div className="flex p-1.5 gap-1 bg-slate-800/40 m-6 mb-4 rounded-2xl relative border border-slate-700/30">
+        <div className="flex p-1.5 gap-1 m-6 mb-4 rounded-2xl relative">
           <motion.div
             className="absolute bg-indigo-600 rounded-xl shadow-lg shadow-indigo-500/40"
             initial={false}

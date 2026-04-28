@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Bitcount+Grid+Double&family=Michroma&display=swap');
+@import url('https://googleapis.com');
 @import "tailwindcss";
-
 /* Import custom fonts */
 /* "Bitcount Grid Double"
 "Rethink Sans"
@@ -16,3 +16,6 @@ body {
 .bitcount-title {
   font-family: 'Bitcount Grid Double', monospace;
 }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: #00ff41; border-radius: 10px; }
