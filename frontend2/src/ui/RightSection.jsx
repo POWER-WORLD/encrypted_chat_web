@@ -10,7 +10,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000
 let socket, selectedChatCompare;
 
 const RightSection = () => {
-    const { user, currentChat, setChats, chats } = useChatState();
+    const { user, currentChat, setChats, chats, notification, setNotification } = useChatState();
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(false);
     const [newMessage, setNewMessage] = useState("");
@@ -49,7 +49,7 @@ const RightSection = () => {
         selectedChatCompare = currentChat;
     }, [currentChat]);
 
-    // 3. Listen for real-time incoming messages
+    // 3. Listen for real-time incoming messages and handle notifications
     useEffect(() => {
         socket.on("message received", (newMessageReceived) => {
             // If we are currently looking at the chat the message belongs to
@@ -57,6 +57,7 @@ const RightSection = () => {
                 setMessages((prevMessages) => [...prevMessages, newMessageReceived]);
             } else {
                 // Logic for notification or updating sidebar latest message could go here
+                setNotification((prev) => [...prev, newMessageReceived]);
                 console.log("New message in background node...");
             }
         });
@@ -149,55 +150,52 @@ const RightSection = () => {
     };
 
     return (
-        <div className="flex-1 flex flex-col w-full min-w-0 h-full bg-[#050505] font-mono relative">
+        <div className="flex-1 flex flex-col w-full min-w-0 h-full bg-gradient-to-b from-zinc-950 via-black to-zinc-900 font-mono relative shadow-2xl">
             {!currentChat ? (
-                <div className="flex-1 flex items-center justify-center flex-col opacity-20">
-                    <div className="w-16 h-16 border border-green-500/30 rounded-full flex items-center justify-center animate-pulse mb-4">
-                        <span className="text-green-500 text-2xl">⚡</span>
+                <div className="flex-1 flex items-center justify-center flex-col opacity-30">
+                    <div className="w-20 h-20 border-4 border-green-500/30 rounded-full flex items-center justify-center animate-pulse mb-4 shadow-lg">
+                        <span className="text-green-400 text-3xl">⚡</span>
                     </div>
-                    <p className="text-sm tracking-[0.5em] text-green-500">AWAITING_UPLINK</p>
+                    <p className="text-lg tracking-[0.5em] text-green-400 font-bold uppercase">Awaiting Uplink</p>
                 </div>
             ) : (
                 <>
                     {/* Header */}
-                    <div className="h-14 border-b border-green-900/30 flex items-center px-4 justify-between bg-black/80 backdrop-blur-md z-10">
-                        <div className="flex items-center gap-3">
+                    <div className="h-16 border-b border-green-900/30 flex items-center px-6 justify-between bg-black/80 backdrop-blur-md z-10 shadow-md">
+                        <div className="flex items-center gap-4">
                             {/* Visual indicator for socket connection */}
-                            <div className={`w-2 h-2 rounded-full animate-pulse shadow-[0_0_8px] ${socketConnected ? 'bg-green-500 shadow-green-500' : 'bg-red-500 shadow-red-500'}`}></div>
+                            <div className={`w-3 h-3 rounded-full animate-pulse shadow-[0_0_12px] ${socketConnected ? 'bg-green-400 shadow-green-400' : 'bg-red-500 shadow-red-500'}`}></div>
                             <div className="min-w-0">
-                                <p className="text-[10px] text-green-700 font-bold uppercase leading-none mb-1">NODE_ACTIVE</p>
-                                <p className="text-sm font-bold text-white uppercase tracking-tighter truncate">
+                                <p className="text-xs text-green-700 font-bold uppercase leading-none mb-1 tracking-widest">NODE ACTIVE</p>
+                                <p className="text-base font-extrabold text-green-200 uppercase tracking-tight truncate">
                                     {!currentChat.isGroupChat ? getSender(user, currentChat.users) : currentChat.chatName}
                                 </p>
                             </div>
                         </div>
 
-                        <button onClick={() => setIsModalOpen(true)} className="p-2 border border-green-900/50 hover:border-green-500 transition-colors shrink-0">
-                            <span className="text-green-500 text-[10px] font-black">{currentChat.isGroupChat ? "[GROUP_CONFIG]" : "[USER_ID]"}</span>
+                        <button onClick={() => setIsModalOpen(true)} className="p-2 border border-green-900/50 hover:border-green-500 rounded-lg transition-colors shrink-0 bg-zinc-900/60 hover:bg-green-900/10">
+                            <span className="text-green-400 text-xs font-black">{currentChat.isGroupChat ? "[GROUP CONFIG]" : "[USER ID]"}</span>
                         </button>
                     </div>
 
                     {/* Messages Area */}
-                    <div className="flex-1 p-4 overflow-y-auto custom-scrollbar">
-                        
-                        
+                    <div className="flex-1 p-6 md:p-8 overflow-y-auto custom-scrollbar bg-gradient-to-b from-black/60 to-zinc-900/80">
                         {loading ? (
                             <div className="h-full flex items-center justify-center">
-                                <div className="text-green-500 text-[10px] animate-pulse">DECRYPTING_DATA_PACKETS...</div>
+                                <div className="text-green-400 text-xs md:text-sm animate-pulse font-bold uppercase tracking-widest">Decrypting Data Packets...</div>
                             </div>
                         ) : (
-                            <div className="space-y-4">
+                            <div className="space-y-6">
                                 {messages.map((m) => {
                                     const isMine = m.sender._id === user._id;
                                     return (
-                                        
                                         <div key={m._id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
-                                            <span className="text-[7px] text-green-900 mb-1 uppercase font-bold tracking-widest">
-                                                {isMine ? 'LOCAL_OUTBOUND' : m.sender.name} [{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}]
+                                            <span className="text-[10px] text-green-500 mb-1 uppercase font-bold tracking-widest">
+                                                {isMine ? 'LOCAL OUTBOUND' : m.sender.name} [{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}]
                                             </span>
-                                            <div className={`max-w-[85%] p-3 text-xs md:text-sm shadow-2xl relative ${isMine
-                                                    ? "bg-green-600/10 border-r-2 border-green-500 text-green-400"
-                                                    : "bg-zinc-900/50 border-l-2 border-zinc-700 text-zinc-300"
+                                            <div className={`max-w-[85%] p-3 md:p-4 text-xs md:text-base shadow-2xl relative rounded-2xl ${isMine
+                                                    ? "bg-green-600/30 border-r-4 border-green-400 text-green-300"
+                                                    : "bg-zinc-500/30 border-l-4 border-zinc-500 text-zinc-200"
                                                 }`}>
                                                 {m.content}
                                             </div>
@@ -208,32 +206,32 @@ const RightSection = () => {
                             </div>
                         )}
                         {/* Typing Indicator */}
-                    {isTyping ? (
-                        <div className="flex items-center gap-2 mb-2">
-                            <div className="flex gap-1">
-                                <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce"></span>
-                                <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                                <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                        {isTyping ? (
+                            <div className="flex items-center gap-2 mb-2 mt-2">
+                                <div className="flex gap-1">
+                                    <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce"></span>
+                                    <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                                    <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                                </div>
+                                <span className="text-[10px] text-green-700 uppercase tracking-widest font-bold">
+                                    Remote Node Transmitting...
+                                </span>
                             </div>
-                            <span className="text-[8px] text-green-800 uppercase tracking-widest font-bold">
-                                REMOTE_NODE_TRANSMITTING...
-                            </span>
-                        </div>
-                    ) : null}
+                        ) : null}
                     </div>
 
                     {/* Message Input */}
-                    <div className="p-4 bg-black border-t border-green-900/30">
-                        <form onSubmit={sendMessage} className="flex items-center gap-2 bg-zinc-950 border border-green-900/50 p-2 focus-within:border-green-500 transition-all">
-                            <span className="text-green-500 text-xs font-black px-1">$</span>
+                    <div className="p-4 md:p-6 bg-black/80 border-t border-green-900/30">
+                        <form onSubmit={sendMessage} className="flex items-center gap-3 bg-zinc-950 border border-green-900/50 p-3 rounded-xl focus-within:border-green-400 focus-within:ring-2 focus-within:ring-green-700/20 transition-all shadow-lg">
+                            <span className="text-green-400 text-base font-black px-1">$</span>
                             <input
-                                placeholder={isTyping ? "NODE_TYPING..." : "TYPE_MESSAGE_HERE"}
+                                placeholder={isTyping ? "Node typing..." : "Type message here"}
                                 value={newMessage}
                                 onChange={typingHandler}
-                                className="flex-1 bg-transparent outline-none text-sm text-green-300 placeholder-green-700/50"
+                                className="flex-1 bg-transparent outline-none text-base text-green-200 placeholder-green-700/50 px-2"
                             />
-                            <button type="submit" className="text-green-500 hover:text-white px-2 group">
-                                <span className="text-xs group-hover:translate-x-1 transition-transform inline-block">➤</span>
+                            <button type="submit" className="text-green-400 hover:text-white px-3 py-2 rounded-lg bg-green-900/10 hover:bg-green-500/80 group transition-all shadow">
+                                <span className="text-lg group-hover:translate-x-1 transition-transform inline-block">➤</span>
                             </button>
                         </form>
                     </div>
