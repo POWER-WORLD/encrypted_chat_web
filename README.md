@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # 🔐 MSG_CRYPT — Encrypted Chat
 
@@ -546,4 +546,3 @@ This project is licensed under the **ISC License**.
 `> SYSTEM_STATUS: ONLINE`
 
 </div>
-]]>
