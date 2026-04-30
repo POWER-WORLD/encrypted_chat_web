@@ -238,7 +238,7 @@ encrypted_chats/
 **1. Clone the repository**
 ```bash
 git clone https://github.com/POWER-WORLD/encrypted_chat_web.git
-cd encrypted_chats
+cd encrypted_chat_web
 ```
 
 **2. Set up the Backend**
