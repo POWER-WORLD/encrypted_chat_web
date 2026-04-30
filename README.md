@@ -237,7 +237,7 @@ encrypted_chats/
 
 **1. Clone the repository**
 ```bash
-git clone https://github.com/your-username/encrypted_chats.git
+git clone https://github.com/POWER-WORLD/encrypted_chat_web.git
 cd encrypted_chats
 ```
 
