@@ -95,7 +95,7 @@ const TopBar = ({ onMenuToggle }) => {
                 {/* Visual Scanning Effect */}
                 <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-green-400/60 via-green-500/80 to-green-400/60 shadow-[0_0_24px_#22c55e] z-50 animate-pulse"></div>
 
-                <div className="h-16 md:h-24 border-b border-green-500/20 flex items-center justify-between px-2 sm:px-4 md:px-10 transition-all duration-300">
+                <div className="h-20 md:h-20 border-b border-green-500/20 flex items-center justify-between px-2 sm:px-4 md:px-10 transition-all duration-300">
                     {/* LEFT: Logo */}
                     <div className="flex items-center gap-2 sm:gap-5 py-2 md:py-0">
                         <button onClick={onMenuToggle} className="md:hidden px-4 py-2 border border-green-500/60 text-green-400 font-mono text-sm rounded-xl hover:bg-green-500/10 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all shadow">
@@ -105,7 +105,7 @@ const TopBar = ({ onMenuToggle }) => {
                     </div>
 
                     {/* CENTER: Search Section */}
-                    <div ref={searchRef} className="hidden sm:flex flex-1 max-w-xl mx-2 md:mx-10 relative group">
+                    <div ref={searchRef} className="hidden sm:flex flex-1 min-w-[200px] max-w-xl mx-2 md:mx-10 relative group">
                         <div className="relative flex w-full bg-black/80 border border-green-500/40 items-center focus-within:border-green-400 rounded-xl shadow-inner overflow-hidden transition-all">
                             <span className="pl-4">
                                 <Search className="w-5 h-5 text-green-900" />
@@ -290,6 +290,54 @@ const TopBar = ({ onMenuToggle }) => {
                                 </>
                             )}
                         </AnimatePresence>
+                    </div>
+                </div>
+                {/* MOBILE SEARCH: Only shows on 'xs' and 'sm' screens below the header */}
+                <div className="sm:hidden px-2 pb-2 animate-fade-in">
+                    <div ref={searchRef} className="relative group">
+                        <div className="relative flex w-full bg-black/80 border border-green-500/40 items-center focus-within:border-green-400 rounded-xl shadow-inner overflow-hidden transition-all">
+                            <span className="pl-4">
+                                <Search className="w-5 h-5 text-green-900" />
+                            </span>
+                            <input
+                                type="text"
+                                value={search}
+                                onChange={(e) => handleSearch(e.target.value)}
+                                className="w-full bg-transparent px-4 py-3 text-base text-green-200 focus:outline-none font-mono placeholder:text-green-900/60"
+                                placeholder="Search node..."
+                            />
+                            {loading && <div className="pr-4 text-base text-green-400 animate-pulse">...</div>}
+                        </div>
+
+                        {/* SEARCH RESULTS DROPDOWN */}
+                        {searchResult.length > 0 && (
+                            <div className="absolute top-full left-0 w-full bg-black/95 border border-green-500/60 mt-2 rounded-2xl shadow-2xl overflow-hidden z-[120] animate-fade-in" ref={searchRef}>
+                                <div className="text-xs bg-green-500/10 text-green-900 px-4 py-3 border-b border-green-900/30 uppercase tracking-widest font-bold">
+                                    Nodes Found: {searchResult.length}
+                                </div>
+                                {searchResult.map((user) => (
+                                    <div
+                                        key={user._id}
+                                        onClick={() => accessChat(user._id)}
+                                        className="flex items-center justify-between px-4 py-3 hover:bg-green-500/20 cursor-pointer border-b border-green-900/10 transition-colors group gap-3"
+                                    >
+                                        <div className="flex flex-col">
+                                            <span className="text-base text-green-300 group-hover:text-white font-bold truncate max-w-[160px]">{user.name}</span>
+                                            <span className="text-xs text-green-900 font-mono">ID: {user._id}</span>
+                                        </div>
+                                        <div className="w-11 h-11 border-2 border-green-900 rounded-full overflow-hidden group-hover:border-green-400 transition-all">
+                                            <img
+                                                src={user.profilePicture || "https://dicebear.com"}
+                                                className="w-full h-full object-cover grayscale group-hover:grayscale-0"
+                                                alt="node"
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                                {/* show loading  */}
+                                {loading && <div className="p-3 text-center text-green-400 animate-pulse">Loading...</div>}
+                            </div>
+                        )}
                     </div>
                 </div>
             </header>
