@@ -12,6 +12,11 @@ body {
   font-family: 'Michroma', sans-serif;
 }
 
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
 /* Ensure Bitcount Grid Double is available for custom use */
 .bitcount-title {
   font-family: 'Bitcount Grid Double', monospace;
