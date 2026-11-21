@@ -94,11 +94,23 @@ app.use('/api/users/register', authRateLimiter);
 
 // System status and health routes
 app.get('/api/health', (req, res) => {
+    const mongoose = require('mongoose');
+    const dbState = mongoose.connection.readyState;
+    const dbStatusMap = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+    const isConnected = dbState === 1 || isTestEnv;
+
     res.status(200).json({
-        status: 'healthy',
+        status: isConnected ? 'healthy' : 'degraded',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'development',
+        database: {
+            status: dbStatusMap[dbState] || 'unknown',
+            readyState: dbState,
+            message: dbState === 1
+                ? 'MongoDB connected and operational.'
+                : 'Database is currently disconnected or connecting. Please check MONGO_URI in your dashboard.',
+        },
     });
 });
 
@@ -110,6 +122,24 @@ app.get('/', (req, res) => {
         healthCheck: '/api/health',
     });
 });
+
+// Database connection readiness check middleware for active data routes
+const checkDatabaseReadiness = (req, res, next) => {
+    if (req.path === '/api/health' || req.path === '/') {
+        return next();
+    }
+    const readyState = require('mongoose').connection.readyState;
+    if (readyState !== 1 && !isTestEnv) {
+        return res.status(503).json({
+            success: false,
+            message: 'Database connection is in progress or unavailable. If this is Render, please ensure MONGO_URI in your dashboard environment variables points to an active MongoDB Atlas cluster.',
+            databaseStatus: readyState === 2 ? 'connecting' : 'disconnected',
+        });
+    }
+    next();
+};
+
+app.use('/api', checkDatabaseReadiness);
 
 // API routes
 app.use('/api/users', userRoutes);
@@ -241,16 +271,15 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Initialize server when not running in automated test suite
 if (!isTestEnv) {
-    connectDB()
-        .then(() => {
-            server.listen(PORT, () => {
-                console.log(`Encrypted Chats API listening on port: http://localhost:${PORT}`);
-            });
-        })
-        .catch((err) => {
-            console.error(`Database connection failed on startup: ${err.message}`);
-            process.exit(1);
+    server.listen(PORT, () => {
+        console.log(`Encrypted Chats API listening on port: http://localhost:${PORT}`);
+        console.log(`[STARTUP] Bound port ${PORT} successfully for Render web service detection.`);
+
+        // Connect to MongoDB asynchronously without blocking port binding or triggering Render crash loops
+        connectDB().catch((err) => {
+            console.warn(`[DATABASE_STARTUP_WARN] Initial database connection attempt failed: ${err.message}`);
         });
+    });
 }
 
 module.exports = {
