@@ -1,130 +1,146 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useChatState } from '../context/ChatProvider';
 import axios from 'axios';
 import io from 'socket.io-client';
-import ProfileModal from '../ui/models/ProfileModal';
-import UpdateGroupChatModal from '../ui/models/UpdateGroupChatModal';
-import { getSender, getSenderFull } from '../config/chatLogics';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
-let socket, selectedChatCompare;
+import ProfileModal from './modals/ProfileModal';
+import UpdateGroupChatModal from './modals/UpdateGroupChatModal';
+import { getSender, getSenderFull, formatMessageTime } from '../config/chatLogics';
+import { API_BASE_URL } from '../config/constants';
+import { Send, Terminal, Shield, Zap } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const RightSection = () => {
-    const { user, currentChat, setChats, chats, notification, setNotification } = useChatState();
+    const { user, currentChat, setNotification } = useChatState();
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(false);
     const [newMessage, setNewMessage] = useState("");
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [socketConnected, setSocketConnected] = useState(false);
-    const [typing, setTyping] = useState(false);
     const [isTyping, setIsTyping] = useState(false);
 
+    const socketRef = useRef(null);
+    const selectedChatCompareRef = useRef(null);
+    const typingTimeoutRef = useRef(null);
     const messagesEndRef = useRef(null);
 
-    // 1. Initialize Socket Connection
+    // Keep selected chat ref synchronized for socket event handlers
     useEffect(() => {
-        socket = io(API_BASE_URL);
+        selectedChatCompareRef.current = currentChat;
+    }, [currentChat]);
+
+    // 1. Initialize and Manage Socket Connection Lifecycle
+    useEffect(() => {
+        if (!user?._id) return;
+
+        const socket = io(API_BASE_URL, {
+            transports: ['websocket', 'polling'],
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+        });
+        socketRef.current = socket;
+
         socket.emit("setup", user);
         socket.on("connected", () => setSocketConnected(true));
 
-        // Cleanup on unmount
-        return () => {
-            socket.disconnect();
-        };
-    }, [user]);
-
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    };
-
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
-
-
-    // 2. Fetch messages when chat changes
-    useEffect(() => {
-        fetchMessages();
-        // Keep track of the current chat to compare with incoming socket messages
-        selectedChatCompare = currentChat;
-    }, [currentChat]);
-
-    // 3. Listen for real-time incoming messages and handle notifications
-    useEffect(() => {
-        socket.on("message received", (newMessageReceived) => {
-            // If we are currently looking at the chat the message belongs to
-            if (selectedChatCompare && selectedChatCompare._id === newMessageReceived.chat._id) {
-                setMessages((prevMessages) => [...prevMessages, newMessageReceived]);
-            } else {
-                // Logic for notification or updating sidebar latest message could go here
-                setNotification((prev) => [...prev, newMessageReceived]);
-                console.log("New message in background node...");
+        socket.on("typing", (room) => {
+            if (selectedChatCompareRef.current && selectedChatCompareRef.current._id === room) {
+                setIsTyping(true);
             }
         });
 
-        // Remove listener to prevent memory leaks/duplicate messages
-        return () => {
-            socket.off("message received");
-        };
-    });
-
-    // 4. Typing indicator logic (optional but adds to the "hacker vibe")
-    useEffect(() => {
-        socket.on("typing", () => setIsTyping(true));
-        socket.on("stop typing", () => setIsTyping(false));
-
-        return () => {
-            socket.off("typing");
-            socket.off("stop typing");
-        }
-    }, []);
-
-    // function to handle typing events
-    const typingHandler = (e) => {
-        setNewMessage(e.target.value);
-        if (!socketConnected) return;
-
-        if (!typing) {
-            setTyping(true);
-            socket.emit("typing", currentChat._id);
-        }
-
-        let lastTypingTime = new Date().getTime();
-        const timerLength = 3000; // 3 seconds
-        setTimeout(() => {
-            const timeNow = new Date().getTime();
-            const timeDiff = timeNow - lastTypingTime;
-            if (timeDiff >= timerLength && typing) {
-                socket.emit("stop typing", currentChat._id);
-                setTyping(false);
+        socket.on("stop typing", (room) => {
+            if (selectedChatCompareRef.current && selectedChatCompareRef.current._id === room) {
+                setIsTyping(false);
             }
-        }, timerLength);
-    };
+        });
 
-    // function to fetch messages for the selected chat
-    const fetchMessages = async () => {
-        if (!currentChat) return;
+        socket.on("message received", (newMessageReceived) => {
+            const activeChat = selectedChatCompareRef.current;
+            if (activeChat && activeChat._id === newMessageReceived.chat?._id) {
+                setMessages((prevMessages) => {
+                    // Message deduplication
+                    if (prevMessages.some((m) => m._id === newMessageReceived._id)) {
+                        return prevMessages;
+                    }
+                    return [...prevMessages, newMessageReceived];
+                });
+            } else {
+                // Incoming message for another chat -> Notification
+                setNotification((prev) => {
+                    if (prev.some((n) => n._id === newMessageReceived._id)) {
+                        return prev;
+                    }
+                    return [newMessageReceived, ...prev];
+                });
+            }
+        });
+
+        return () => {
+            socket.disconnect();
+            socketRef.current = null;
+        };
+    }, [user, setNotification]);
+
+    // 2. Fetch Messages when currentChat changes
+    const fetchMessages = useCallback(async () => {
+        if (!currentChat?._id || !user?.token) return;
 
         try {
             setLoading(true);
             const config = { headers: { Authorization: `Bearer ${user.token}` } };
             const { data } = await axios.get(`${API_BASE_URL}/api/messages/${currentChat._id}`, config);
 
-            setMessages(data);
+            setMessages(Array.isArray(data) ? data : []);
             setLoading(false);
 
             // Join the specific room for this chat
-            socket.emit("join chat", currentChat._id);
-        } catch (error) {
-            console.error("DECRYPTION_FAILED", error);
+            if (socketRef.current) {
+                socketRef.current.emit("join chat", currentChat._id);
+            }
+        } catch {
+            toast.error("Failed to decrypt conversation history");
             setLoading(false);
         }
+    }, [currentChat?._id, user?.token]);
+
+    useEffect(() => {
+        fetchMessages();
+        setIsTyping(false);
+    }, [fetchMessages]);
+
+    // Auto-scroll to bottom whenever messages update
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages, isTyping]);
+
+    // 3. Typing event handling with clean debouncing
+    const typingHandler = (e) => {
+        setNewMessage(e.target.value);
+        if (!socketConnected || !socketRef.current || !currentChat?._id) return;
+
+        socketRef.current.emit("typing", currentChat._id);
+
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+        }
+
+        typingTimeoutRef.current = setTimeout(() => {
+            if (socketRef.current && currentChat?._id) {
+                socketRef.current.emit("stop typing", currentChat._id);
+            }
+        }, 2000);
     };
 
-    // function to send a new message
+    // 4. Send Message Handler
     const sendMessage = async (e) => {
         e.preventDefault();
-        if (!newMessage.trim()) return;
+        const contentToSend = newMessage.trim();
+        if (!contentToSend || !currentChat?._id) return;
+
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        if (socketRef.current) socketRef.current.emit("stop typing", currentChat._id);
+        
+        setNewMessage("");
 
         try {
             const config = {
@@ -133,114 +149,167 @@ const RightSection = () => {
                     Authorization: `Bearer ${user.token}`
                 },
             };
-            const messageContent = newMessage;
-            setNewMessage("");
 
             const { data } = await axios.post(`${API_BASE_URL}/api/messages`, {
-                content: messageContent,
+                content: contentToSend,
                 chatId: currentChat._id,
             }, config);
 
-            // Emit the message to socket so other users get it
-            socket.emit("new message", data);
-            setMessages([...messages, data]);
-        } catch (error) {
-            console.error("TRANSMISSION_ERROR", error);
+            // Emit through socket for real-time delivery to peer
+            if (socketRef.current) {
+                socketRef.current.emit("new message", data);
+            }
+
+            // Deduplicate and append local state
+            setMessages((prev) => {
+                if (prev.some((m) => m._id === data._id)) return prev;
+                return [...prev, data];
+            });
+        } catch {
+            toast.error("Packet transmission error");
         }
     };
 
+    const peerName = !currentChat?.isGroupChat 
+        ? getSender(user, currentChat?.users) 
+        : (currentChat?.chatName || "Encrypted Group");
+
     return (
-        <div className="flex-1 flex flex-col w-full min-w-0 h-full bg-gradient-to-b from-zinc-950 via-black to-zinc-900 font-mono relative shadow-2xl">
+        <div className="flex-1 flex flex-col w-full min-w-0 h-full bg-[#050505] font-mono relative shadow-2xl">
             {!currentChat ? (
-                <div className="flex-1 flex items-center justify-center flex-col opacity-30">
-                    <div className="w-20 h-20 border-4 border-green-500/30 rounded-full flex items-center justify-center animate-pulse mb-4 shadow-lg">
-                        <span className="text-green-400 text-3xl">⚡</span>
+                <div className="flex-1 flex items-center justify-center flex-col opacity-40 p-6 text-center select-none">
+                    <div className="w-20 h-20 border-2 border-green-500/40 rounded-full flex items-center justify-center animate-pulse mb-4 shadow-[0_0_20px_rgba(34,197,94,0.2)]">
+                        <Zap size={32} className="text-green-400" />
                     </div>
-                    <p className="text-lg tracking-[0.5em] text-green-400 font-bold uppercase">Awaiting Uplink</p>
+                    <p className="text-sm tracking-[0.4em] text-green-400 font-bold uppercase mb-2">Awaiting Uplink</p>
+                    <p className="text-xs text-zinc-500 max-w-xs font-sans">
+                        Select a channel from the sidebar or search a node to establish an encrypted transmission session.
+                    </p>
                 </div>
             ) : (
                 <>
                     {/* Header */}
-                    <div className="h-16 border-b border-green-900/30 flex items-center px-6 justify-between bg-black/80 backdrop-blur-md z-10 shadow-md">
-                        <div className="flex items-center gap-4">
-                            {/* Visual indicator for socket connection */}
-                            <div className={`w-3 h-3 rounded-full animate-pulse shadow-[0_0_12px] ${socketConnected ? 'bg-green-400 shadow-green-400' : 'bg-red-500 shadow-red-500'}`}></div>
+                    <header className="h-16 border-b border-green-900/40 flex items-center px-4 sm:px-6 justify-between bg-zinc-950/90 backdrop-blur-md z-10">
+                        <div className="flex items-center gap-3 min-w-0 pr-3">
+                            {/* Socket Status Indicator */}
+                            <span 
+                                title={socketConnected ? "Socket Online" : "Reconnecting Socket"}
+                                className={`w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px] ${
+                                    socketConnected ? 'bg-green-400 shadow-green-400 animate-pulse' : 'bg-red-500 shadow-red-500'
+                                }`}
+                            />
                             <div className="min-w-0">
-                                <p className="text-xs text-green-700 font-bold uppercase leading-none mb-1 tracking-widest">NODE ACTIVE</p>
-                                <p className="text-base font-extrabold text-green-200 uppercase tracking-tight truncate">
-                                    {!currentChat.isGroupChat ? getSender(user, currentChat.users) : currentChat.chatName}
+                                <p className="text-[9px] text-green-600 font-bold uppercase tracking-widest leading-none mb-1">
+                                    {currentChat.isGroupChat ? 'CLUSTER NODE' : 'PEER LINK'}
                                 </p>
+                                <h2 className="text-sm sm:text-base font-extrabold text-green-200 tracking-tight truncate">
+                                    {peerName}
+                                </h2>
                             </div>
                         </div>
 
-                        <button onClick={() => setIsModalOpen(true)} className="p-2 border border-green-900/50 hover:border-green-500 rounded-lg transition-colors shrink-0 bg-zinc-900/60 hover:bg-green-900/10">
-                            <span className="text-green-400 text-xs font-black">{currentChat.isGroupChat ? "[GROUP CONFIG]" : "[USER ID]"}</span>
+                        <button 
+                            onClick={() => setIsModalOpen(true)} 
+                            className="px-3 py-1.5 border border-green-500/50 hover:border-green-400 rounded text-xs font-mono font-bold text-green-400 hover:bg-green-500/10 transition-all shrink-0 cursor-pointer flex items-center gap-1.5"
+                        >
+                            <Terminal size={12} />
+                            <span>{currentChat.isGroupChat ? "CLUSTER_CONFIG" : "NODE_INFO"}</span>
                         </button>
-                    </div>
+                    </header>
 
                     {/* Messages Area */}
-                    <div className="flex-1 p-6 md:p-8 overflow-y-auto custom-scrollbar bg-gradient-to-b from-black/60 to-zinc-900/80">
+                    <div className="flex-1 p-4 sm:p-6 overflow-y-auto custom-scrollbar bg-black/60 space-y-4">
                         {loading ? (
                             <div className="h-full flex items-center justify-center">
-                                <div className="text-green-400 text-xs md:text-sm animate-pulse font-bold uppercase tracking-widest">Decrypting Data Packets...</div>
+                                <div className="text-green-400 text-xs animate-pulse font-bold uppercase tracking-widest flex items-center gap-2">
+                                    <Shield size={16} className="animate-spin" /> Decrypting Data Packets...
+                                </div>
+                            </div>
+                        ) : messages.length === 0 ? (
+                            <div className="h-full flex items-center justify-center text-zinc-600 text-xs italic">
+                                [CHANNEL_READY: No prior communications logged]
                             </div>
                         ) : (
-                            <div className="space-y-6">
-                                {messages.map((m) => {
-                                    const isMine = m.sender._id === user._id;
-                                    return (
-                                        <div key={m._id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
-                                            <span className="text-[10px] text-green-500 mb-1 uppercase font-bold tracking-widest">
-                                                {isMine ? 'LOCAL OUTBOUND' : m.sender.name} [{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}]
+                            messages.map((m, idx) => {
+                                const isMine = m.sender?._id === user._id;
+                                const senderName = isMine ? 'LOCAL' : (m.sender?.name || 'REMOTE');
+                                
+                                return (
+                                    <div 
+                                        key={m._id || `msg-${idx}`} 
+                                        className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
+                                    >
+                                        <div className="flex items-center gap-2 text-[9px] text-zinc-500 mb-1 font-mono uppercase tracking-wider">
+                                            <span className={isMine ? 'text-green-500 font-bold' : 'text-zinc-400'}>
+                                                {senderName}
                                             </span>
-                                            <div className={`max-w-[85%] p-3 md:p-4 text-xs md:text-base shadow-2xl relative rounded-2xl ${isMine
-                                                    ? "bg-green-600/30 border-r-4 border-green-400 text-green-300"
-                                                    : "bg-zinc-500/30 border-l-4 border-zinc-500 text-zinc-200"
-                                                }`}>
-                                                {m.content}
-                                            </div>
+                                            <span>[{formatMessageTime(m.createdAt)}]</span>
                                         </div>
-                                    );
-                                })}
-                                <div ref={messagesEndRef} />
-                            </div>
+                                        <div 
+                                            className={`max-w-[85%] sm:max-w-[75%] p-3 text-xs sm:text-sm rounded-xl break-words shadow-lg ${
+                                                isMine
+                                                    ? "bg-green-950/40 border border-green-500/40 text-green-200 rounded-tr-none"
+                                                    : "bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-tl-none"
+                                            }`}
+                                        >
+                                            {m.content}
+                                        </div>
+                                    </div>
+                                );
+                            })
                         )}
-                        {/* Typing Indicator */}
-                        {isTyping ? (
-                            <div className="flex items-center gap-2 mb-2 mt-2">
+
+                        {/* Remote Typing Indicator */}
+                        {isTyping && (
+                            <div className="flex items-center gap-2 pt-2">
                                 <div className="flex gap-1">
-                                    <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce"></span>
-                                    <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                                    <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                                    <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-bounce"></span>
+                                    <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                                    <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
                                 </div>
-                                <span className="text-[10px] text-green-700 uppercase tracking-widest font-bold">
-                                    Remote Node Transmitting...
+                                <span className="text-[9px] text-green-600 uppercase tracking-widest font-mono">
+                                    Peer transmitting packet stream...
                                 </span>
                             </div>
-                        ) : null}
+                        )}
+                        <div ref={messagesEndRef} />
                     </div>
 
-                    {/* Message Input */}
-                    <div className="p-4 md:p-6 bg-black/80 border-t border-green-900/30">
-                        <form onSubmit={sendMessage} className="flex items-center gap-3 bg-zinc-950 border border-green-900/50 p-3 rounded-xl focus-within:border-green-400 focus-within:ring-2 focus-within:ring-green-700/20 transition-all shadow-lg">
-                            <span className="text-green-400 text-base font-black px-1">$</span>
+                    {/* Message Input Bar */}
+                    <div className="p-3 sm:p-4 bg-zinc-950 border-t border-green-900/30">
+                        <form onSubmit={sendMessage} className="flex items-center gap-2 bg-black border border-green-900/60 focus-within:border-green-500/80 p-2 rounded-xl transition-all shadow-inner">
+                            <span className="text-green-500 font-bold text-sm px-2 select-none">$</span>
                             <input
-                                placeholder={isTyping ? "Node typing..." : "Type message here"}
+                                placeholder={isTyping ? "Peer node is typing..." : "Transmit encrypted payload..."}
                                 value={newMessage}
                                 onChange={typingHandler}
-                                className="flex-1 bg-transparent outline-none text-base text-green-200 placeholder-green-700/50 px-2"
+                                aria-label="Message Payload Input"
+                                className="flex-1 bg-transparent outline-none text-xs sm:text-sm text-green-300 placeholder:text-zinc-600 px-1 font-mono"
                             />
-                            <button type="submit" className="text-green-400 hover:text-white px-3 py-2 rounded-lg bg-green-900/10 hover:bg-green-500/80 group transition-all shadow">
-                                <span className="text-lg group-hover:translate-x-1 transition-transform inline-block">➤</span>
+                            <button 
+                                type="submit" 
+                                disabled={!newMessage.trim()}
+                                aria-label="Send message"
+                                className="text-black bg-green-500 hover:bg-green-400 disabled:opacity-30 disabled:bg-zinc-800 disabled:text-zinc-600 p-2 rounded-lg transition-all cursor-pointer shrink-0 shadow-[0_0_10px_rgba(34,197,94,0.3)]"
+                            >
+                                <Send size={15} />
                             </button>
                         </form>
                     </div>
 
                     {/* Modals */}
                     {currentChat.isGroupChat ? (
-                        <UpdateGroupChatModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} fetchMessages={fetchMessages} />
+                        <UpdateGroupChatModal 
+                            isOpen={isModalOpen} 
+                            onClose={() => setIsModalOpen(false)} 
+                            fetchMessages={fetchMessages} 
+                        />
                     ) : (
-                        <ProfileModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} user={getSenderFull(user, currentChat.users)} />
+                        <ProfileModal 
+                            isOpen={isModalOpen} 
+                            onClose={() => setIsModalOpen(false)} 
+                            user={getSenderFull(user, currentChat.users)} 
+                        />
                     )}
                 </>
             )}

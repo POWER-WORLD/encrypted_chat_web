@@ -2,57 +2,114 @@ const asyncHandler = require('express-async-handler');
 const Message = require('../models/messageModel');
 const User = require('../models/userModel');
 const Chat = require('../models/chatModel');
-// @desc    Send a new message
-// @route   POST /api/messages/
-// @access  Protected
+const { isValidObjectId } = require('../utils/validators');
+
+/**
+ * @desc    Send a new message to a chat
+ * @route   POST /api/messages
+ * @access  Protected
+ */
 const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId } = req.body;
+    const { content, chatId } = req.body;
+
     if (!content || !chatId) {
-    console.log('Invalid data passed into request');
-    return res.sendStatus(400);
-  }
+        res.status(400);
+        throw new Error('content and chatId are required in request body');
+    }
 
-  var newMessage = {
-    sender: req.user._id,
-    content: content,
-    chat: chatId,
-  };
+    const trimmedContent = typeof content === 'string' ? content.trim() : '';
+    if (trimmedContent.length === 0) {
+        res.status(400);
+        throw new Error('Message content cannot be empty');
+    }
 
-    try {
-    var message = await Message.create(newMessage);
+    if (trimmedContent.length > 5000) {
+        res.status(400);
+        throw new Error('Message content exceeds maximum allowed length of 5000 characters');
+    }
 
-    message = await message.populate('sender', 'name pic');
+    if (!isValidObjectId(chatId)) {
+        res.status(400);
+        throw new Error('Invalid chatId format');
+    }
+
+    // Verify chat existence
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+        res.status(404);
+        throw new Error('Chat not found');
+    }
+
+    // IDOR Security Authorization: Check if sender is a member of the chat
+    const isParticipant = chat.users.some(
+        (userId) => userId.toString() === req.user._id.toString()
+    );
+
+    if (!isParticipant) {
+        res.status(403);
+        throw new Error('Forbidden: You are not authorized to send messages to this chat');
+    }
+
+    const newMessage = {
+        sender: req.user._id,
+        content: trimmedContent,
+        chat: chatId,
+    };
+
+    let message = await Message.create(newMessage);
+
+    message = await message.populate('sender', 'name profilePicture pic email');
     message = await message.populate('chat');
     message = await User.populate(message, {
-      path: 'chat.users',
-      select: 'name pic email',
+        path: 'chat.users',
+        select: 'name profilePicture pic email',
     });
 
-    await Chat.findByIdAndUpdate(req.body.chatId, { latestMessage: message });
+    // Update latestMessage on chat
+    await Chat.findByIdAndUpdate(chatId, { latestMessage: message._id });
 
-    res.json(message);
-  } catch (error) {
-    console.error('Error sending message:', error);
-    res.sendStatus(500);
-  }
+    res.status(201).json(message);
 });
 
-// @desc    Get all messages for a chat
-// @route   GET /api/messages/:chatId
-// @access  Protected
+/**
+ * @desc    Get all messages for a specific chat
+ * @route   GET /api/messages/:chatId
+ * @access  Protected
+ */
 const allMessages = asyncHandler(async (req, res) => {
-  try {
-    const messages = await Message.find({ chat: req.params.chatId })
-      .populate('sender', 'name pic')
-      .populate('chat');
+    const { chatId } = req.params;
 
-    res.json(messages);
-  } catch (error) {
-    console.error('Error fetching messages:', error);
-    res.sendStatus(500);
-  }
+    if (!chatId || !isValidObjectId(chatId)) {
+        res.status(400);
+        throw new Error('Invalid or missing chatId parameter');
+    }
+
+    // Verify chat existence
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+        res.status(404);
+        throw new Error('Chat not found');
+    }
+
+    // IDOR Security Authorization: Check if user is a member of the chat
+    const isParticipant = chat.users.some(
+        (userId) => userId.toString() === req.user._id.toString()
+    );
+
+    if (!isParticipant) {
+        res.status(403);
+        throw new Error('Forbidden: You are not authorized to view messages in this chat');
+    }
+
+    const messages = await Message.find({ chat: chatId })
+        .populate('sender', 'name profilePicture pic email')
+        .populate('chat')
+        .sort({ createdAt: 1 });
+
+    res.status(200).json(messages);
 });
 
-
-
-module.exports = { sendMessage, allMessages };
+module.exports = {
+    sendMessage,
+    allMessages,
+};

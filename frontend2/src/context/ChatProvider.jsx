@@ -1,37 +1,47 @@
-import { createContext, useContext, useEffect, useState, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 
-const ChatContext = createContext();
+export const ChatContext = createContext(null);
+
+/**
+ * Safely parse JSON from localStorage without throwing crashes
+ */
+const safeParse = (key, fallback = null) => {
+    try {
+        const item = localStorage.getItem(key);
+        if (!item || item === "undefined") return fallback;
+        return JSON.parse(item);
+    } catch (e) {
+        console.warn(`[STORAGE_WARN] Failed to parse '${key}':`, e);
+        return fallback;
+    }
+};
 
 export const ChatProvider = ({ children }) => {
-    const [user, setUser] = useState(() => {
-        const userInfo = localStorage.getItem("userInfo");
-        return userInfo ? JSON.parse(userInfo) : null;
-    });
-
-    const [currentChat, setCurrentChat] = useState(null);
+    const [user, setUser] = useState(() => safeParse("userInfo", null));
+    const [currentChat, setCurrentChatState] = useState(null);
     const [chats, setChats] = useState([]);
-    
-    // 1. Persistence: Load notifications from localStorage on startup
-    const [notification, setNotification] = useState(() => {
-        const savedNotifications = localStorage.getItem("notifications");
-        return savedNotifications ? JSON.parse(savedNotifications) : [];
-    });
+    const [notification, setNotification] = useState(() => safeParse("notifications", []));
 
     const navigate = useNavigate();
     const location = useLocation();
 
-    // 2. Persistence: Save notifications to localStorage whenever they change
+    // Persist notifications safely
     useEffect(() => {
-        localStorage.setItem("notifications", JSON.stringify(notification));
+        try {
+            localStorage.setItem("notifications", JSON.stringify(notification));
+        } catch (e) {
+            console.warn("[STORAGE_WARN] Failed to persist notifications:", e);
+        }
     }, [notification]);
 
-    // 3. Auto-Clear: If user is looking at a chat, remove its notifications
-    useEffect(() => {
-        if (currentChat) {
-            setNotification((prev) => prev.filter((n) => n.chat._id !== currentChat._id));
+    // Enhanced chat selector that automatically clears notifications for opened chat
+    const setCurrentChat = useCallback((chat) => {
+        setCurrentChatState(chat);
+        if (chat?._id) {
+            setNotification((prev) => prev.filter((n) => n.chat?._id !== chat._id));
         }
-    }, [currentChat]);
+    }, []);
 
     // Auth Guard
     useEffect(() => {
@@ -40,11 +50,13 @@ export const ChatProvider = ({ children }) => {
         }
     }, [user, navigate, location.pathname]);
 
-    // Sync State across Tabs
+    // Synchronize authentication across browser tabs
     useEffect(() => {
-        const syncAuth = () => {
-            const userInfo = localStorage.getItem("userInfo");
-            setUser(userInfo ? JSON.parse(userInfo) : null);
+        const syncAuth = (event) => {
+            if (event.key === "userInfo") {
+                const updatedUser = safeParse("userInfo", null);
+                setUser(updatedUser);
+            }
         };
         window.addEventListener("storage", syncAuth);
         return () => window.removeEventListener("storage", syncAuth);
@@ -59,7 +71,7 @@ export const ChatProvider = ({ children }) => {
         setChats, 
         notification, 
         setNotification 
-    }), [user, currentChat, chats, notification]);
+    }), [user, currentChat, setCurrentChat, chats, notification]);
 
     return (
         <ChatContext.Provider value={value}>
@@ -70,7 +82,7 @@ export const ChatProvider = ({ children }) => {
 
 export const useChatState = () => {
     const context = useContext(ChatContext);
-    if (context === undefined) {
+    if (!context) {
         throw new Error("useChatState must be used within a ChatProvider");
     }
     return context;

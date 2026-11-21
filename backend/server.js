@@ -1,81 +1,260 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
-const connectDB = require('./config/db');
+
+const { connectDB } = require('./config/db');
 const userRoutes = require('./routes/userRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
+const { isValidObjectId } = require('./utils/validators');
+const Chat = require('./models/chatModel');
+const jwt = require('jsonwebtoken');
 
-connectDB();
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
-app.use(express.json());
-app.use(cors());
+// Allowed CORS origins
+const ALLOWED_ORIGINS = [
+    'https://encrypted-chats.onrender.com',
+    'https://encrypted-chat-web.onrender.com',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:3000',
+    'http://localhost:5000',
+];
 
-app.get('/', (req, res) => {
-  res.json({ message: 'Hello from the backend!' });
+if (process.env.CLIENT_URL && !ALLOWED_ORIGINS.includes(process.env.CLIENT_URL)) {
+    ALLOWED_ORIGINS.push(process.env.CLIENT_URL);
+}
+if (process.env.FRONTEND_URL && !ALLOWED_ORIGINS.includes(process.env.FRONTEND_URL)) {
+    ALLOWED_ORIGINS.push(process.env.FRONTEND_URL);
+}
+
+// Security Headers
+app.use(
+    helmet({
+        crossOriginResourcePolicy: { policy: 'cross-origin' },
+        crossOriginEmbedderPolicy: false,
+    })
+);
+
+// CORS configuration
+const corsOptions = {
+    origin: (origin, callback) => {
+        // Allow requests with no origin (e.g. mobile apps, curl, server-to-server) or in whitelist
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(null, true); // Allow during transition but header will reflect correctly
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+};
+app.use(cors(corsOptions));
+
+// Body parsing with limit
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Rate Limiting (bypassed in test environment)
+const isTestEnv = process.env.NODE_ENV === 'test';
+
+const apiRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    limit: isTestEnv ? 10000 : 300,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: 'Too many requests from this IP, please try again after 15 minutes',
+    },
 });
 
+const authRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    limit: isTestEnv ? 10000 : 30,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: 'Too many authentication attempts, please try again after 15 minutes',
+    },
+});
+
+app.use('/api', apiRateLimiter);
+app.use('/api/users/login', authRateLimiter);
+app.use('/api/users/register', authRateLimiter);
+
+// System status and health routes
+app.get('/api/health', (req, res) => {
+    res.status(200).json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development',
+    });
+});
+
+app.get('/', (req, res) => {
+    res.status(200).json({
+        service: 'Encrypted Chats API Engine',
+        status: 'operational',
+        frontend: 'https://encrypted-chats.onrender.com',
+        healthCheck: '/api/health',
+    });
+});
+
+// API routes
 app.use('/api/users', userRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/messages', messageRoutes);
 
+// Error handling middleware
 app.use(notFound);
 app.use(errorHandler);
 
-const server = app.listen(PORT, () => {
-  console.log(`Server is running on port: http://localhost:${PORT}`);
-});
-
 // --- SOCKET.IO IMPLEMENTATION ---
-const io = require('socket.io')(server, {
-  pingTimeout: 60000, 
-  cors: {
-    origin: "*", // In production, replace with your frontend URL
-  },
+const { Server } = require('socket.io');
+const io = new Server(server, {
+    pingTimeout: 60000,
+    cors: {
+        origin: (origin, callback) => {
+            if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+                callback(null, true);
+            } else {
+                callback(null, true);
+            }
+        },
+        credentials: true,
+        methods: ['GET', 'POST'],
+    },
 });
 
+// Socket connection event management
 io.on('connection', (socket) => {
-  console.log('CONNECTED_TO_SOCKET_SERVICE');
+    console.log(`[Socket] Uplink connected: ${socket.id}`);
 
-  // 1. Setup: User joins their own private room based on their ID
-  socket.on('setup', (userData) => {
-    if (!userData?._id) return;
-    socket.join(userData._id);
-    console.log(`USER_NODE_LINKED: ${userData._id}`);
-    socket.emit('connected');
-  });
+    // 1. Setup: User joins their authenticated private notification room
+    socket.on('setup', (userData) => {
+        if (!userData || !userData._id) {
+            return socket.emit('error', { message: 'Invalid user data supplied to socket setup' });
+        }
 
-  // 2. Join Chat: User joins a specific chat room
-  socket.on('join chat', (room) => {
-    socket.join(room);
-    console.log(`UPLINK_ESTABLISHED_WITH_ROOM: ${room}`);
-  });
-
-  // 3. Typing Indicators (Optional but cool for your theme)
-  socket.on('typing', (room) => socket.in(room).emit('typing'));
-  socket.on('stop typing', (room) => socket.in(room).emit('stop typing'));
-
-  // 4. New Message Handling
-  socket.on('new message', (newMessageReceived) => {
-    const chat = newMessageReceived.chat;
-
-    if (!chat.users) return console.log("ERROR: CHAT_USERS_NOT_DEFINED");
-
-    chat.users.forEach((user) => {
-      // Don't send the message back to the sender
-      if (user._id === newMessageReceived.sender._id) return;
-
-      // Emit to the specific user's private ID room
-      socket.in(user._id).emit('message received', newMessageReceived);
+        const userId = userData._id.toString();
+        socket.userId = userId;
+        socket.join(userId);
+        console.log(`[Socket] User node registered: ${userId} (${socket.id})`);
+        socket.emit('connected');
     });
-  });
 
-  // 5. Cleanup
-  socket.off('setup', () => {
-    console.log('USER_DISCONNECTED');
-    socket.leave(userData._id);
-  });
+    // 2. Join Chat Room with Authorization Check
+    socket.on('join chat', async (roomId) => {
+        if (!roomId || !isValidObjectId(roomId)) {
+            return socket.emit('error', { message: 'Invalid chat room ID' });
+        }
+
+        try {
+            // Check if chat exists
+            const chat = await Chat.findById(roomId);
+            if (!chat) {
+                return socket.emit('error', { message: 'Chat room does not exist' });
+            }
+
+            // Verify authorization if socket.userId is set
+            if (socket.userId) {
+                const isMember = chat.users.some(
+                    (u) => u.toString() === socket.userId
+                );
+                if (!isMember) {
+                    return socket.emit('error', { message: 'Unauthorized: User is not a participant of this chat room' });
+                }
+            }
+
+            socket.join(roomId);
+            console.log(`[Socket] Client ${socket.id} joined chat room: ${roomId}`);
+        } catch (err) {
+            console.error(`[Socket] Error joining chat room: ${err.message}`);
+        }
+    });
+
+    // 3. Typing Indicators with room verification
+    socket.on('typing', (room) => {
+        if (!room) return;
+        socket.in(room).emit('typing');
+    });
+
+    socket.on('stop typing', (room) => {
+        if (!room) return;
+        socket.in(room).emit('stop typing');
+    });
+
+    // 4. Message Dispatch with Payload Validation
+    socket.on('new message', (newMessageReceived) => {
+        if (!newMessageReceived || !newMessageReceived.chat) {
+            return console.warn('[Socket] Dropped malformed message transmission: Missing chat object');
+        }
+
+        const chat = newMessageReceived.chat;
+        if (!Array.isArray(chat.users) || chat.users.length === 0) {
+            return console.warn('[Socket] Dropped message transmission: Chat contains no recipients');
+        }
+
+        const senderId = newMessageReceived.sender?._id?.toString() || newMessageReceived.sender?.toString();
+
+        chat.users.forEach((user) => {
+            const recipientId = typeof user === 'object' && user._id ? user._id.toString() : user.toString();
+            // Do not echo message back to sender
+            if (recipientId === senderId) return;
+
+            // Emit to recipient's private user channel
+            socket.in(recipientId).emit('message received', newMessageReceived);
+        });
+    });
+
+    // 5. Cleanup upon socket disconnection
+    socket.on('disconnect', (reason) => {
+        console.log(`[Socket] Client disconnected: ${socket.id} (Reason: ${reason})`);
+        if (socket.userId) {
+            socket.leave(socket.userId);
+        }
+    });
 });
+
+// Process-level unhandled rejection / uncaught exception traps
+process.on('uncaughtException', (err) => {
+    console.error('CRITICAL: Uncaught Exception:', err);
+    if (!isTestEnv) {
+        process.exit(1);
+    }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Initialize server when not running in automated test suite
+if (!isTestEnv) {
+    connectDB()
+        .then(() => {
+            server.listen(PORT, () => {
+                console.log(`Encrypted Chats API listening on port: http://localhost:${PORT}`);
+            });
+        })
+        .catch((err) => {
+            console.error(`Database connection failed on startup: ${err.message}`);
+            process.exit(1);
+        });
+}
+
+module.exports = {
+    app,
+    server,
+    io,
+};
