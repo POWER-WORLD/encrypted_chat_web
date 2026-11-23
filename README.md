@@ -20,7 +20,7 @@
 
 | Service | Environment | Live URL | Health Status |
 |:---|:---|:---|:---|
-| **Frontend Application** | Production (Render Static) | [https://encrypted-chats.onrender.com](https://encriptedtalks.vercel.app) | `ONLINE` |
+| **Frontend Application** | Production (Render Static) | [https://encriptedtalks.vercel.app](https://encriptedtalks.vercel.app) | `ONLINE` |
 | **Backend REST & WebSocket API** | Production (Render Web Service) | [https://encrypted-chat-web.onrender.com](https://encrypted-chat-web.onrender.com) | `ONLINE` |
 
 <br/>
